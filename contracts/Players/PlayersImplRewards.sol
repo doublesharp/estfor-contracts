@@ -290,19 +290,24 @@ contract PlayersImplRewards is PlayersUpgradeableImplDummyBase, PlayersBase, IPl
 
         Equipment[] memory consumedEquipment;
         Equipment memory outputEquipment;
-        uint baseNumConsumed;
-
-        (consumedEquipment, outputEquipment, xpElapsedTime, died, baseNumConsumed) = _processConsumablesView(
-          from,
-          _playerId,
-          queuedAction,
-          elapsedTime,
-          combatStats,
-          actionChoice
-        );
+        uint24 baseNumConsumed;
+        uint24 numProduced;
+        (
+          consumedEquipment,
+          outputEquipment,
+          xpElapsedTime,
+          died,
+          baseNumConsumed,
+          numProduced
+        ) = _processConsumablesView(from, _playerId, queuedAction, elapsedTime, combatStats, actionChoice);
 
         choiceIds[choiceIdsLength++] = queuedAction.choiceId;
-        choiceIdAmounts[choiceIdAmountsLength++] = baseNumConsumed;
+        Skill skill = _getSkillFromChoiceOrStyle(actionChoice, queuedAction.combatStyle, queuedAction.actionId);
+        if (skill == Skill.COOKING) {
+          choiceIdAmounts[choiceIdAmountsLength++] = numProduced; // Assume we want amount cooked
+        } else {
+          choiceIdAmounts[choiceIdAmountsLength++] = baseNumConsumed;
+        }
 
         if (outputEquipment.itemTokenId != NONE) {
           pendingQueuedActionState.produced[producedLength++] = EquipmentInfo(
@@ -437,12 +442,23 @@ contract PlayersImplRewards is PlayersUpgradeableImplDummyBase, PlayersBase, IPl
     }
 
     // Quest Rewards
-    (uint[] memory questRewards, uint[] memory questRewardAmounts, uint[] memory _questsCompleted) = quests
-      .processQuestsView(_playerId, choiceIds, choiceIdAmounts);
+    (
+      uint[] memory questRewards,
+      uint[] memory questRewardAmounts,
+      uint[] memory itemTokenIdsBurned,
+      uint[] memory amountsBurned,
+      Skill[] memory skillsGained,
+      uint32[] memory xpGained,
+      uint[] memory _questsCompleted
+    ) = quests.processQuestsView(_playerId, choiceIds, choiceIdAmounts);
     if (questRewards.length > 0) {
       pendingQueuedActionState.questRewards = new Equipment[](questRewards.length);
       for (uint j = 0; j < questRewards.length; ++j) {
         pendingQueuedActionState.questRewards[j] = Equipment(uint16(questRewards[j]), uint24(questRewardAmounts[j]));
+      }
+      pendingQueuedActionState.questConsumed = new Equipment[](itemTokenIdsBurned.length);
+      for (uint j = 0; j < itemTokenIdsBurned.length; ++j) {
+        pendingQueuedActionState.questConsumed[j] = Equipment(uint16(itemTokenIdsBurned[j]), uint24(amountsBurned[j]));
       }
     }
     // Compact to fit the arrays
@@ -675,7 +691,8 @@ contract PlayersImplRewards is PlayersUpgradeableImplDummyBase, PlayersBase, IPl
       Equipment memory outputEquipment,
       uint xpElapsedTime,
       bool died,
-      uint24 numConsumed
+      uint24 numConsumed,
+      uint24 numProduced
     )
   {
     consumedEquipment = new Equipment[](4);
@@ -759,17 +776,17 @@ contract PlayersImplRewards is PlayersUpgradeableImplDummyBase, PlayersBase, IPl
         );
       }
 
-      uint24 amount = uint24((numConsumed * _actionChoice.outputNum * successPercent) / 100);
+      numProduced = uint24((numConsumed * _actionChoice.outputNum * successPercent) / 100);
 
       // Check for any gathering boosts
       PlayerBoostInfo storage activeBoost = activeBoosts_[_playerId];
       uint boostedTime = PlayersLibrary.getBoostedTime(_queuedAction.startTime, _elapsedTime, activeBoost);
       if (boostedTime > 0 && activeBoost.boostType == BoostType.GATHERING) {
-        amount += uint24((boostedTime * amount * activeBoost.val) / (3600 * 100));
+        numProduced += uint24((boostedTime * numProduced * activeBoost.val) / (3600 * 100));
       }
 
-      if (amount != 0) {
-        outputEquipment = Equipment(_actionChoice.outputTokenId, amount);
+      if (numProduced != 0) {
+        outputEquipment = Equipment(_actionChoice.outputTokenId, numProduced);
       }
     }
 

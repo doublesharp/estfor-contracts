@@ -80,13 +80,15 @@ contract PlayersImplProcessActions is PlayersUpgradeableImplDummyBase, PlayersBa
       ActionChoice memory actionChoice;
 
       uint xpElapsedTime = elapsedTime;
+      Skill skill = _getSkillFromChoiceOrStyle(actionChoice, queuedAction.combatStyle, queuedAction.actionId);
 
       if (queuedAction.choiceId != 0) {
         // Includes combat
         uint combatElapsedTime;
         actionChoice = world.getActionChoice(isCombat ? NONE : queuedAction.actionId, queuedAction.choiceId);
         uint24 baseNumConsumed;
-        (xpElapsedTime, combatElapsedTime, died, baseNumConsumed) = _processConsumables(
+        uint24 numProduced;
+        (xpElapsedTime, combatElapsedTime, died, baseNumConsumed, numProduced) = _processConsumables(
           _from,
           _playerId,
           queuedAction,
@@ -96,11 +98,14 @@ contract PlayersImplProcessActions is PlayersUpgradeableImplDummyBase, PlayersBa
         );
 
         choiceIds[choiceIdsLength++] = queuedAction.choiceId;
-        choiceIdAmounts[choiceIdAmountsLength++] = baseNumConsumed;
+        if (skill == Skill.COOKING) {
+          choiceIdAmounts[choiceIdAmountsLength++] = numProduced; // Assume we want amount cooked
+        } else {
+          choiceIdAmounts[choiceIdAmountsLength++] = baseNumConsumed;
+        }
       }
 
       uint64 _queueId = queuedAction.queueId;
-      Skill skill = _getSkillFromChoiceOrStyle(actionChoice, queuedAction.combatStyle, queuedAction.actionId);
 
       uint pointsAccruedExclBaseBoost;
       if (!died) {
@@ -187,6 +192,31 @@ contract PlayersImplProcessActions is PlayersUpgradeableImplDummyBase, PlayersBa
     }
   }
 
+  function _processQuests(
+    address _from,
+    uint _playerId,
+    uint[] memory _choiceIds,
+    uint[] memory _choiceIdAmounts
+  ) private {
+    (
+      uint[] memory itemTokenIds,
+      uint[] memory amounts,
+      uint[] memory itemTokenIdsBurned,
+      uint[] memory amountsBurned,
+      Skill[] memory skillsGained,
+      uint32[] memory xpGained,
+      uint[] memory _questsCompleted
+    ) = quests.processQuests(_playerId, _choiceIds, _choiceIdAmounts);
+    // Mint the rewards
+    if (itemTokenIds.length > 0) {
+      itemNFT.mintBatch(_from, itemTokenIds, amounts);
+    }
+    // Burn the rewards
+    for (uint i; i < itemTokenIdsBurned.length; ++i) {
+      itemNFT.burn(_from, itemTokenIdsBurned[i], amountsBurned[i]);
+    }
+  }
+
   function _processActionsFinished(address _from, uint _playerId) private {
     _claimRandomRewards(_playerId);
     _handleDailyRewards(_from, _playerId);
@@ -206,7 +236,7 @@ contract PlayersImplProcessActions is PlayersUpgradeableImplDummyBase, PlayersBa
     uint _elapsedTime,
     CombatStats memory _combatStats,
     ActionChoice memory _actionChoice
-  ) private returns (uint xpElapsedTime, uint combatElapsedTime, bool died, uint24 numConsumed) {
+  ) private returns (uint xpElapsedTime, uint combatElapsedTime, bool died, uint24 numConsumed, uint24 numProduced) {
     bool isCombat = _isCombatStyle(_queuedAction.combatStyle);
 
     if (isCombat) {
@@ -248,17 +278,17 @@ contract PlayersImplProcessActions is PlayersUpgradeableImplDummyBase, PlayersBa
         );
       }
 
-      uint amount = (numConsumed * _actionChoice.outputNum * successPercent) / 100;
+      numProduced = (numConsumed * _actionChoice.outputNum * successPercent) / 100;
 
       // Check for any gathering boosts
       PlayerBoostInfo storage activeBoost = activeBoosts_[_playerId];
       uint boostedTime = PlayersLibrary.getBoostedTime(_queuedAction.startTime, _elapsedTime, activeBoost);
       if (boostedTime > 0 && activeBoost.boostType == BoostType.GATHERING) {
-        amount += uint24((boostedTime * amount * activeBoost.val) / (3600 * 100));
+        numProduced += uint24((boostedTime * numProduced * activeBoost.val) / (3600 * 100));
       }
-      if (amount != 0) {
-        itemNFT.mint(_from, _actionChoice.outputTokenId, amount);
-        emit Reward(_from, _playerId, _queuedAction.queueId, _actionChoice.outputTokenId, amount);
+      if (numProduced != 0) {
+        itemNFT.mint(_from, _actionChoice.outputTokenId, numProduced);
+        emit Reward(_from, _playerId, _queuedAction.queueId, _actionChoice.outputTokenId, numProduced);
       }
     }
   }

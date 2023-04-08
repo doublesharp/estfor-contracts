@@ -454,23 +454,6 @@ abstract contract PlayersBase {
     emit SetActionQueue(_from, _playerId, player.actionQueue);
   }
 
-  function _processQuests(
-    address _from,
-    uint _playerId,
-    uint[] memory _choiceIds,
-    uint[] memory _choiceIdAmounts
-  ) internal {
-    (uint[] memory itemTokenIds, uint[] memory amounts, uint[] memory _questsCompleted) = quests.processQuests(
-      _playerId,
-      _choiceIds,
-      _choiceIdAmounts
-    );
-
-    if (itemTokenIds.length > 0) {
-      itemNFT.mintBatch(_from, itemTokenIds, amounts);
-    }
-  }
-
   function _checkStartSlot() internal pure {
     uint expectedStartSlotNumber = 251; // From the various slot arrays expected in the base classes
     uint slot;

@@ -186,6 +186,7 @@ struct PendingQueuedActionState {
   PastRandomRewardInfo[] producedPastRandomRewards;
   Equipment[] producedXPRewards;
   Equipment[] questRewards;
+  Equipment[] questConsumed;
   DiedInfo[] died;
   RollInfo[] rolls;
   XPInfo[] xpGained;
